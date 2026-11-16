@@ -47,12 +47,40 @@ if sys.platform == "darwin":
         imports = subprocess.check_output(["otool", "-L", framework_files[module]], text=True)
         qt_modules.update(re.findall(r"Qt(\w+)\.framework/", imports))
 
+if sys.platform == "win32":
+    # Qt's Windows DLL dependencies differ from macOS frameworks. Preserve
+    # their transitive imports before trimming optional Qt modules.
+    import pefile
+    dll_files = {}
+    for entry in a.binaries:
+        match = re.search(r"Qt6(\w+)\.dll$", entry[0], re.I)
+        if match:
+            dll_files[match.group(1).lower()] = entry[1]
+    pending = {module.lower() for module in qt_modules}
+    scanned = set()
+    while pending-scanned:
+        module = next(iter(pending-scanned))
+        scanned.add(module)
+        if module not in dll_files:
+            continue
+        with pefile.PE(dll_files[module], fast_load=True) as binary_info:
+            binary_info.parse_data_directories(directories=[1,13])
+            for dependency in (getattr(binary_info,"DIRECTORY_ENTRY_IMPORT",[]) +
+                               getattr(binary_info,"DIRECTORY_ENTRY_DELAY_IMPORT",[])):
+                match = re.fullmatch(r"Qt6(\w+)\.dll", dependency.dll.decode("ascii"), re.I)
+                if match:
+                    pending.add(match.group(1).lower())
+    qt_modules.update(pending)
+
+qt_modules_lower = {module.lower() for module in qt_modules}
+
 def needed_path(path):
-    name = path.replace("\\", "/")
+    name = "/"+path.replace("\\", "/").lstrip("/")
     if "/plugins/multimedia/" in name and "ffmpeg" not in name.rsplit("/",1)[-1].lower():
         return False
-    if "/Qt/qml/" in name:
-        relative = name.split("/Qt/qml/", 1)[1]
+    qml_root = "/Qt/qml/" if "/Qt/qml/" in name else "/PySide6/qml/" if "/PySide6/qml/" in name else ""
+    if qml_root:
+        relative = name.split(qml_root, 1)[1]
         if relative.startswith(("QtQml/", "QtMultimedia/")):
             return True
         if relative.startswith("QtQuick/"):
@@ -62,10 +90,10 @@ def needed_path(path):
             return item.startswith(("Controls/Basic/", "Controls/impl/", "Templates/", "Layouts/", "Window/", "Effects/")) or (item.startswith("Controls/") and item.count("/") == 1)
         return False
     match = re.search(r"/Qt(\w+)\.framework/", name)
-    if match and match.group(1) not in qt_modules:
+    if match and match.group(1).lower() not in qt_modules_lower:
         return False
     match = re.search(r"(?:lib)?Qt6(\w+)(?:\.dll|\.so)", name)
-    if match and match.group(1) not in qt_modules:
+    if match and match.group(1).lower() not in qt_modules_lower:
         return False
     if "/Qt/translations/" in name:
         return name.endswith(("_ru.qm", "_en.qm"))
