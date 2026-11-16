@@ -1,0 +1,81 @@
+[
+  {
+    "name": "PySide6-Essentials",
+    "version": "6.12.0",
+    "files": []
+  },
+  {
+    "name": "PySide6-Addons",
+    "version": "6.12.0",
+    "files": []
+  },
+  {
+    "name": "shiboken6",
+    "version": "6.12.0",
+    "files": []
+  },
+  {
+    "name": "onnxruntime",
+    "version": "1.31.1",
+    "files": [
+      "licenses/dependencies/onnxruntime/onnxruntime/LICENSE",
+      "licenses/dependencies/onnxruntime/onnxruntime/ThirdPartyNotices.txt"
+    ]
+  },
+  {
+    "name": "onnx-asr",
+    "version": "0.12.0",
+    "files": [
+      "licenses/dependencies/onnx-asr/onnx_asr-0.12.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "numpy",
+    "version": "2.5.4",
+    "files": [
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/LICENSE.txt",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/_core/src/highway/LICENSE",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/_core/src/multiarray/dragon4_LICENSE.txt",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/ma/LICENSE",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/random/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/random/src/distributions/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/random/src/philox/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md",
+      "licenses/dependencies/numpy/numpy-2.5.4.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md",
+      "licenses/dependencies/numpy/numpy/_core/include/numpy/random/LICENSE.txt",
+      "licenses/dependencies/numpy/numpy/ma/LICENSE",
+      "licenses/dependencies/numpy/numpy/random/LICENSE.md"
+    ]
+  },
+  {
+    "name": "soundfile",
+    "version": "0.14.0",
+    "files": [
+      "licenses/dependencies/soundfile/_soundfile_data/COPYING",
+      "licenses/dependencies/soundfile/licensing/license_notes.md",
+      "licenses/dependencies/soundfile/soundfile-0.14.0.dist-info/LICENSE"
+    ]
+  },
+  {
+    "name": "cffi",
+    "version": "2.1.1",
+    "files": [
+      "licenses/dependencies/cffi/cffi-2.1.1.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "imageio-ffmpeg",
+    "version": "0.8.1",
+    "files": [
+      "licenses/dependencies/imageio-ffmpeg/imageio_ffmpeg-0.8.1.dist-info/licenses/LICENSE"
+    ]
+  }
+]

@@ -1,0 +1,4 @@
+work/
+outputs/
+*.egg-info/
+__pycache__/
