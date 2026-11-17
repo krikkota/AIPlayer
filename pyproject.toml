@@ -1,6 +1,6 @@
 [project]
 name = "local-media-player"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local desktop media player with GigaAM transcripts and Ollama search"
 requires-python = ">=3.12"
 dependencies = [

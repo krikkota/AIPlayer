@@ -16,7 +16,7 @@ binary = imageio_ffmpeg.get_ffmpeg_exe()
 a = Analysis([str(root / "launcher.py")], pathex=[str(root)],
     binaries=[(binary, "imageio_ffmpeg/binaries")], datas=datas,
     hiddenimports=["PySide6.QtQuick", "PySide6.QtQuickControls2", "PySide6.QtQml",
-                   "PySide6.QtMultimedia", "PySide6.QtMultimediaQuick", "PySide6.QtSvg",
+                   "PySide6.QtMultimedia", "PySide6.QtSvg",
                    "onnx_asr.preprocessors.numpy_preprocessor"],
     excludes=["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
               "PySide6.QtPdf", "PySide6.QtPdfWidgets", "PySide6.QtQuick3D", "PySide6.QtCharts",
@@ -47,31 +47,6 @@ if sys.platform == "darwin":
         imports = subprocess.check_output(["otool", "-L", framework_files[module]], text=True)
         qt_modules.update(re.findall(r"Qt(\w+)\.framework/", imports))
 
-if sys.platform == "win32":
-    # Qt's Windows DLL dependencies differ from macOS frameworks. Preserve
-    # their transitive imports before trimming optional Qt modules.
-    import pefile
-    dll_files = {}
-    for entry in a.binaries:
-        match = re.search(r"Qt6(\w+)\.dll$", entry[0], re.I)
-        if match:
-            dll_files[match.group(1).lower()] = entry[1]
-    pending = {module.lower() for module in qt_modules}
-    scanned = set()
-    while pending-scanned:
-        module = next(iter(pending-scanned))
-        scanned.add(module)
-        if module not in dll_files:
-            continue
-        with pefile.PE(dll_files[module], fast_load=True) as binary_info:
-            binary_info.parse_data_directories(directories=[1,13])
-            for dependency in (getattr(binary_info,"DIRECTORY_ENTRY_IMPORT",[]) +
-                               getattr(binary_info,"DIRECTORY_ENTRY_DELAY_IMPORT",[])):
-                match = re.fullmatch(r"Qt6(\w+)\.dll", dependency.dll.decode("ascii"), re.I)
-                if match:
-                    pending.add(match.group(1).lower())
-    qt_modules.update(pending)
-
 qt_modules_lower = {module.lower() for module in qt_modules}
 
 def needed_path(path):
@@ -99,6 +74,36 @@ def needed_path(path):
         return name.endswith(("_ru.qm", "_en.qm"))
     return "QtWebEngineProcess" not in name
 
+if sys.platform == "win32":
+    # QML plugins import additional Qt DLLs that the Python modules themselves
+    # do not use. Seed the closure with EVERY retained native plugin as well as
+    # the selected Qt modules; otherwise a valid QML plugin cannot be loaded.
+    import pefile
+    dll_files = {}
+    for entry in a.binaries:
+        match = re.fullmatch(r"Qt6(\w+)\.dll", Path(entry[0]).name, re.I)
+        if match:
+            dll_files[match.group(1).lower()] = entry[1]
+    pending = [entry[1] for entry in a.binaries
+               if entry[2] == "BINARY" and needed_path(entry[0])]
+    scanned = set()
+    while pending:
+        path = pending.pop()
+        if path in scanned:
+            continue
+        scanned.add(path)
+        with pefile.PE(path, fast_load=True) as binary_info:
+            binary_info.parse_data_directories(directories=[1, 13])
+            for dependency in (getattr(binary_info, "DIRECTORY_ENTRY_IMPORT", []) +
+                               getattr(binary_info, "DIRECTORY_ENTRY_DELAY_IMPORT", [])):
+                match = re.fullmatch(r"Qt6(\w+)\.dll", dependency.dll.decode("ascii"), re.I)
+                if match:
+                    module = match.group(1).lower()
+                    if module not in dll_files:
+                        raise RuntimeError(f"Missing Qt dependency: {dependency.dll!r} required by {path}")
+                    qt_modules_lower.add(module)
+                    pending.append(dll_files[module])
+
 def needed(entry):
     # PyInstaller also creates flat aliases such as QtWebEngineCore. Keep an
     # alias only if its target survived the module filter; dangling aliases
@@ -117,7 +122,7 @@ collection = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="AIP
 if sys.platform == "darwin":
     app = BUNDLE(collection, name="AIPlayer.app", icon=str(root / "player/assets/Player.icns"),
         bundle_identifier="local.aiplayer.desktop", info_plist={
-            "CFBundleDisplayName": "AIPlayer", "CFBundleShortVersionString": "0.2.0",
+            "CFBundleDisplayName": "AIPlayer", "CFBundleShortVersionString": "0.2.1",
             "NSHighResolutionCapable": True, "LSMinimumSystemVersion": "14.0",
             "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
             "CFBundleDocumentTypes": [{"CFBundleTypeName": "Audio and Video", "CFBundleTypeRole": "Viewer",

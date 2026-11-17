@@ -57,7 +57,7 @@ def main():
     app.setOrganizationName("LocalMedia")
     app.setApplicationName("Player")
     app.setApplicationDisplayName("Плеер")
-    app.setApplicationVersion("0.2.0")
+    app.setApplicationVersion("0.2.1")
     assets = Path(__file__).parent / "assets"
     for font in (assets / "fonts").glob("*.ttf"):
         QFontDatabase.addApplicationFont(str(font))
@@ -73,7 +73,8 @@ def main():
     engine.rootContext().setContextProperty("assetRoot", QUrl.fromLocalFile(str(assets) + "/").toString())
     engine.load(QUrl.fromLocalFile(str(Path(__file__).parent / "qml/Main.qml")))
     if not engine.rootObjects():
-        return 1
+        controller.shutdown()
+        raise RuntimeError("Не удалось загрузить интерфейс плеера. Подробности записаны в журнал запуска.")
     window = engine.rootObjects()[0]
     screen = app.primaryScreen()
     if screen:

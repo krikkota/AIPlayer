@@ -5,7 +5,6 @@ from ctypes import wintypes
 import json
 import os
 from pathlib import Path
-import shutil
 import struct
 import subprocess
 import sys
@@ -15,6 +14,11 @@ import time
 def window_texts(pid):
     user32=ctypes.WinDLL('user32',use_last_error=True)
     callback=ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.EnumChildWindows.argtypes = [wintypes.HWND, callback, wintypes.LPARAM]
+    user32.EnumWindows.argtypes = [callback, wintypes.LPARAM]
     result=[]
     def text(hwnd):
         length=user32.GetWindowTextLengthW(hwnd)
