@@ -1,4 +1,12 @@
-work/
-outputs/
-*.egg-info/
+.venv/
+.build-env/
 __pycache__/
+*.pyc
+.pytest_cache/
+work/
+build/
+dist/
+outputs/
+.DS_Store
+*.egg-info/
+
