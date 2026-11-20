@@ -79,7 +79,7 @@ class Store:
         saved = read_json(root / "settings.json", {}, 1024*1024)
         if not isinstance(saved, dict):
             saved = {}
-        self.settings = {"onboarded": False, "asr_path": "", "semantic_model": "",
+        self.settings = {"onboarded": False, "asr_path": "", "sat_enabled": False, "semantic_model": "",
                          "semantic_kind": "", "semantic_digest": "", "recent": []}
         for key, default in self.settings.items():
             value = saved.get(key, default)

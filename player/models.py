@@ -20,6 +20,40 @@ FILES = {
     "vocab.txt": ("v3_e2e_ctc_vocab.txt", 2007,
                   "142de7570b3de5b3035ce111a89c228e80e6085273731d944093ddf24fa539cd"),
 }
+SAT_DIRECTORY = "sat-3l-sm-int8"
+SAT_BASE = ("https://huggingface.co/jiangzhuo9357/sat-3l-sm-onnx/resolve/"
+            "7698b9e41fef7a1e24638b9aaff2108ce1020657/")
+SAT_FILES = {
+    "model.onnx": ("model.onnx", 241945842,
+                   "1132546a16fa1aa9da218602049c6e7aeba0ec5b76409131446f40ebda2be99f"),
+    "tokenizer.json": ("tokenizer.json", 9096718,
+                       "a898ea75433890f6610f4e470b8ebeb0c21dce5c8dd61f892eb09eb5919d2e2c"),
+}
+
+
+def sat_folder(root: Path) -> Path:
+    return root / "models" / SAT_DIRECTORY
+
+
+def sat_installed(root: Path) -> bool:
+    folder = sat_folder(root)
+    try:
+        if folder.is_symlink():
+            return False
+        for name, info in SAT_FILES.items():
+            path = folder / name
+            if not path.is_file() or path.is_symlink() or path.stat().st_size != info[1]:
+                return False
+        return True
+    except OSError:
+        return False
+
+
+def verify_sat(root: Path, cancel) -> bool:
+    return sat_installed(root) and all(
+        digest_file(sat_folder(root) / name, cancel) == info[2]
+        for name, info in SAT_FILES.items()
+    )
 
 
 class HTTPSRedirects(urllib.request.HTTPRedirectHandler):
@@ -85,30 +119,37 @@ def discover(root: Path, saved: str, cancel):
 
 
 def download(root: Path, cancel, progress):
+    return _locked_download(root, "gigaam-download.lock", "gigaam-v3", BASE, FILES, cancel, progress)
+
+
+def download_sat(root: Path, cancel, progress):
+    return _locked_download(root, "sat-download.lock", SAT_DIRECTORY, SAT_BASE, SAT_FILES, cancel, progress)
+
+
+def _locked_download(root, lock_name, directory, base, files, cancel, progress):
     (root/"models").mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock = QLockFile(str(root/"models"/"gigaam-download.lock"))
+    lock = QLockFile(str(root/"models"/lock_name))
     # A large download can legitimately outlive Qt's default stale timeout.
     # Keep PID-based crash recovery, without expiring a live owner's lock.
     lock.setStaleLockTime(0)
     if not lock.tryLock(0):
         raise ValueError("Модель уже загружается в другом окне плеера. Дождитесь завершения загрузки.")
     try:
-        return _download(root, cancel, progress)
+        return _download(root / "models" / directory, base, files, cancel, progress)
     finally:
         lock.unlock()
 
 
-def _download(root: Path, cancel, progress):
-    folder = root / "models" / "gigaam-v3"
+def _download(folder: Path, base, files, cancel, progress):
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     if folder.is_symlink():
         raise ValueError("Каталог загрузки модели не должен быть символической ссылкой.")
-    total = sum(x[1] for x in FILES.values())
+    total = sum(x[1] for x in files.values())
     complete = 0
     opener = urllib.request.build_opener(HTTPSRedirects())
     started = time.monotonic()
     transferred = 0
-    for name, (remote, size, expected) in FILES.items():
+    for name, (remote, size, expected) in files.items():
         check_cancel(cancel)
         target = folder / name
         partial = folder / f"{name}.part"
@@ -126,11 +167,12 @@ def _download(root: Path, cancel, progress):
             partial.unlink()
             existing = 0
         if shutil.disk_usage(folder).free < size-existing+32*1024*1024:
-            raise ValueError("Недостаточно места для модели. Освободите не менее 260 МБ и повторите загрузку.")
+            minimum_mb = (size-existing+32*1024*1024+999999)//1000000
+            raise ValueError(f"Для загрузки нужно ещё место на диске. Освободите не менее {minimum_mb} МБ и повторите.")
         headers = {"User-Agent": "LocalPlayer/0.1"}
         if existing:
             headers["Range"] = f"bytes={existing}-"
-        request = urllib.request.Request(BASE + remote, headers=headers)
+        request = urllib.request.Request(base + remote, headers=headers)
         with opener.open(request, timeout=20) as response:
             if existing and response.status != 206:
                 existing = 0

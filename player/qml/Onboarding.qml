@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Rectangle {
     id: welcome
+    objectName: "firstRunOverlay"
     required property var config
     readonly property bool selectedAvailable: bridge.meaningModels.some(item => item.name===config.selectedModel)
     color: "#ed080808"
@@ -15,7 +16,7 @@ Rectangle {
         id: surface
         anchors.centerIn: parent
         width: Math.min(820, parent.width-48)
-        height: Math.min(570, parent.height-48)
+        height: Math.min(600, parent.height-48)
         radius: 18; color: "#101010"; border.color: "#303034"
         RowLayout {
             anchors.fill: parent; anchors.margins: 30; spacing: 30
@@ -26,7 +27,6 @@ Rectangle {
                     Image { source: assetRoot+"icons/audio-lines.svg"; sourceSize: Qt.size(48,48); Layout.preferredWidth: 24; Layout.preferredHeight: 24 }
                     Text { textFormat: Text.PlainText; text: "Плеер"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 19; font.weight: Font.Medium }
                 }
-                Text { textFormat: Text.PlainText; text: "Смотрите. Слушайте.\nНаходите главное."; color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 13; lineHeight: 1.6; Layout.fillWidth: true }
                 ColumnLayout {
                     spacing: 10; Layout.fillWidth: true
                     Repeater {
@@ -53,14 +53,13 @@ Rectangle {
                     }
                 }
                 Item { Layout.fillHeight: true }
-                Text { textFormat: Text.PlainText; text: "Без аккаунта.\nОбработка на устройстве."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 11; lineHeight: 1.6; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             }
             Rectangle { Layout.fillHeight: true; Layout.preferredWidth: 1; color: "#29292d" }
             ColumnLayout {
                 Layout.fillWidth: true; Layout.fillHeight: true; spacing: 20
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { textFormat: Text.PlainText; text: "Шаг "+(welcome.config.step+1)+" из 3"; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; Layout.fillWidth: true }
+                    Item { Layout.fillWidth: true }
                     PButton { objectName: "deferOnboarding"; text: "Настроить позже"; quiet: true; implicitHeight: 28; onClicked: bridge.finishSetup() }
                 }
                 StackLayout {
@@ -72,17 +71,41 @@ Rectangle {
                         contentWidth: availableWidth
                         ColumnLayout {
                             width: page0.availableWidth
-                            spacing: 16
-                            Text { textFormat: Text.PlainText; text: "Ваша запись.\nЕё полный текст."; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 27; font.weight: Font.Medium; lineHeight: 1.15; Layout.fillWidth: true }
-                            Text { textFormat: Text.PlainText; text: "Плеер распознаёт русскую речь и связывает каждую фразу со временем в записи."; color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 14; lineHeight: 1.45; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            Item { Layout.preferredHeight: 4 }
+                            spacing: 12
+                            Text { textFormat: Text.PlainText; text: "Настройте расшифровку"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 27; font.weight: Font.Medium; lineHeight: 1.15; Layout.fillWidth: true }
+                            ColumnLayout {
+                                visible: !welcome.config.asrReady
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: "Скачайте модель, чтобы плеер мог превращать речь из записи в текст."
+                                    color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 14
+                                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: "Это нужно сделать один раз. Дальше расшифровка работает без интернета."
+                                    color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 12
+                                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                                }
+                            }
                             RowLayout {
-                                spacing: 12; Layout.fillWidth: true
-                                Image { source: assetRoot+"icons/"+(welcome.config.asrReady ? "check" : "audio-lines")+".svg"; sourceSize: Qt.size(48,48); Layout.preferredWidth: 24; Layout.preferredHeight: 24 }
-                                ColumnLayout {
-                                    Layout.fillWidth: true; spacing: 4
-                                    Text { textFormat: Text.PlainText; text: welcome.config.asrChecking ? "Проверяем готовность" : welcome.config.asrReady ? "Распознавание готово" : "GigaAM · 225 МБ"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 14; font.weight: Font.Medium; Layout.fillWidth: true }
-                                    Text { textFormat: Text.PlainText; text: welcome.config.asrReady ? "Модель найдена. Ничего скачивать не нужно." : "Загрузим один раз. Дальше — без интернета."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                visible: welcome.config.asrReady
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Image {
+                                    source: assetRoot + "icons/check.svg"
+                                    sourceSize: Qt.size(32, 32)
+                                    Layout.preferredWidth: 16; Layout.preferredHeight: 16
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: "Распознавание речи готово"
+                                    color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 13
+                                    Layout.fillWidth: true
                                 }
                             }
                             ColumnLayout {
@@ -94,8 +117,33 @@ Rectangle {
                                 PButton { objectName: "pauseModelDownload"; visible: welcome.config.setupBusy; text: "Приостановить"; quiet: true; onClicked: bridge.cancelSetup() }
                             }
                             Text { textFormat: Text.PlainText; objectName: "onboardingError"; visible: welcome.config.setupError.length>0; text: welcome.config.setupError; color: "#f0b9ae"; font.family: "Onest"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            PButton { objectName: "chooseExistingModel"; visible: !welcome.config.asrReady && !welcome.config.setupBusy; text: "Модель уже есть на компьютере"; iconName: "folder-open"; quiet: true; enabled: !welcome.config.asrChecking; onClicked: bridge.chooseModelFolder() }
-                            Text { textFormat: Text.PlainText; text: "Исходный файл не изменяется. Расшифровка хранится отдельно на вашем компьютере."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; lineHeight: 1.4; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            RowLayout {
+                                visible: !welcome.config.asrReady && !welcome.config.setupBusy && !welcome.config.asrChecking
+                                Layout.fillWidth: true
+                                spacing: 8
+                                PButton {
+                                    objectName: "downloadSpeechModel"
+                                    text: welcome.config.setupError.length ? "Повторить загрузку"
+                                        : welcome.config.setupCanResume ? "Продолжить загрузку" : "Скачать модель · 225 МБ"
+                                    iconName: "download"
+                                    primary: true
+                                    onClicked: bridge.downloadModel()
+                                }
+                                PButton {
+                                    objectName: "chooseExistingModel"
+                                    text: "Модель уже есть"
+                                    hint: "Выбрать папку с моделью GigaAM"
+                                    quiet: true
+                                    onClicked: bridge.chooseModelFolder()
+                                }
+                            }
+                            SegmentationSetup {
+                                objectName: "onboardingSegmentation"
+                                config: welcome.config
+                                showComparison: true
+                                Layout.fillWidth: true
+                                Layout.topMargin: 32
+                            }
                         }
                     }
                     ScrollView {
@@ -108,9 +156,9 @@ Rectangle {
                             RowLayout {
                                 Layout.fillWidth: true; spacing: 14
                                 Image { source: assetRoot+"ollama-light.svg"; fillMode: Image.PreserveAspectFit; Layout.preferredWidth: 32; Layout.preferredHeight: 46; sourceSize: Qt.size(64,92) }
-                                Text { textFormat: Text.PlainText; text: "Находите темы,\nа не только слова."; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 24; font.weight: Font.Medium; Layout.fillWidth: true }
+                                Text { textFormat: Text.PlainText; text: "Подключите поиск по смыслу"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 24; font.weight: Font.Medium; Layout.fillWidth: true }
                             }
-                            Text { textFormat: Text.PlainText; text: "Смысловой поиск — дополнительная возможность. Подключите локальную модель Ollama или вернитесь к этому позже."; color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 13; lineHeight: 1.45; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { textFormat: Text.PlainText; text: "Чтобы искать в записи по теме, выберите модель из Ollama. Этот шаг можно пропустить."; color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 13; lineHeight: 1.45; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             RowLayout {
                                 Layout.fillWidth: true
                                 Text { textFormat: Text.PlainText; text: welcome.config.ollamaState==="checking" ? "Проверяем Ollama…" : welcome.config.ollamaState==="ready" || welcome.config.ollamaState==="empty" ? "Ollama подключена" : welcome.config.ollamaInstalled ? "Ollama нужно запустить" : "Для поиска нужна Ollama"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 14; Layout.fillWidth: true }
@@ -127,8 +175,7 @@ Rectangle {
                                 visible: welcome.config.ollamaState!=="ready" && welcome.config.ollamaState!=="empty" && welcome.config.ollamaState!=="checking"
                                 PButton { objectName: "onboardingLaunchOllama"; text: welcome.config.ollamaInstalled ? "Запустить Ollama" : "Установить Ollama"; iconName: welcome.config.ollamaInstalled ? "play" : "external-link"; onClicked: welcome.config.ollamaInstalled ? bridge.launchOllama() : bridge.installOllama() }
                             }
-                            Text { textFormat: Text.PlainText; visible: welcome.config.ollamaState==="offline"; text: "После установки или запуска нажмите обновление. Интернет нужен для получения моделей, а не для обработки записи."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; lineHeight: 1.4; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            Text { textFormat: Text.PlainText; text: "Без Ollama уже доступны воспроизведение, обрезка, расшифровка и поиск по тексту."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; lineHeight: 1.4; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { textFormat: Text.PlainText; visible: welcome.config.ollamaState==="offline"; text: "Запустите Ollama и обновите список моделей."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; lineHeight: 1.4; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         }
                     }
                     ScrollView {
@@ -139,14 +186,13 @@ Rectangle {
                             width: page2.availableWidth
                             spacing: 20
                             Image { source: assetRoot+"icons/check.svg"; sourceSize: Qt.size(64,64); Layout.preferredWidth: 32; Layout.preferredHeight: 32 }
-                            Text { textFormat: Text.PlainText; text: "Откройте первую\nзапись."; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 27; font.weight: Font.Medium; lineHeight: 1.15; Layout.fillWidth: true }
-                            Text { textFormat: Text.PlainText; text: "Аудио или видео — плеер откроет файл и подготовит текст, если распознавание настроено."; color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 14; lineHeight: 1.45; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Text { textFormat: Text.PlainText; text: "Откройте первую запись"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 27; font.weight: Font.Medium; lineHeight: 1.15; Layout.fillWidth: true }
+                            Text { textFormat: Text.PlainText; text: "Выберите аудио или видео. Если GigaAM настроена, плеер начнёт расшифровку автоматически."; color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 14; lineHeight: 1.45; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: 12
                                 Text { textFormat: Text.PlainText; text: "Распознавание речи · "+(welcome.config.asrReady ? "готово" : "можно настроить позже"); color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 13; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                 Text { textFormat: Text.PlainText; text: "Смысловой поиск · "+(welcome.selectedAvailable ? "модель выбрана" : "можно настроить позже"); color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 13; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             }
-                            Text { textFormat: Text.PlainText; text: "Введите слово для поиска. Нажмите на фразу в расшифровке — запись откроется в нужный момент."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; lineHeight: 1.4; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         }
                     }
                 }
@@ -156,12 +202,14 @@ Rectangle {
                     Item { Layout.fillWidth: true }
                     PButton {
                         objectName: "onboardingContinue"
-                        text: welcome.config.setupBusy ? welcome.config.setupPhase==="verifying" ? "Проверяем модель…" : "Загружаем модель…" : welcome.config.step===2 ? "Открыть запись" : welcome.config.step===1 ? welcome.selectedAvailable ? "Продолжить" : "Пока без смыслового поиска" : welcome.config.asrReady ? "Продолжить" : welcome.config.setupError.length ? "Повторить загрузку" : welcome.config.setupCanResume ? "Продолжить загрузку" : "Загрузить 225 МБ"
-                        primary: true; iconName: welcome.config.setupBusy ? "" : welcome.config.step===2 ? "folder-open" : "arrow-right"
-                        enabled: !welcome.config.setupBusy && !(welcome.config.step===0 && welcome.config.asrChecking)
+                        text: welcome.config.step === 2 ? "Открыть запись"
+                            : welcome.config.step === 0 && !welcome.config.asrReady ? "Продолжить без расшифровки"
+                            : "Продолжить"
+                        primary: welcome.config.step !== 0 || welcome.config.asrReady
+                        iconName: welcome.config.step === 2 ? "folder-open" : "arrow-right"
+                        enabled: !welcome.config.setupBusy && !(welcome.config.step === 0 && welcome.config.asrChecking)
                         onClicked: {
-                            if (welcome.config.step===2) bridge.finishSetupAndOpen()
-                            else if (welcome.config.step===0 && !welcome.config.asrReady) bridge.downloadModel()
+                            if (welcome.config.step === 2) bridge.finishSetupAndOpen()
                             else bridge.setStep(welcome.config.step+1)
                         }
                     }

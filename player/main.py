@@ -12,13 +12,14 @@ os.environ.setdefault("QT_MEDIA_BACKEND", "ffmpeg")
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 
 from PySide6.QtCore import QStandardPaths, QTimer, QUrl
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QEvent, Qt
 
+from . import __version__
 from .controller import Controller
 from .storage import Store
 
@@ -47,6 +48,7 @@ def main():
     parser.add_argument("--screenshot")
     parser.add_argument("--quit-after", type=int, default=0)
     parser.add_argument("--show-settings", action="store_true")
+    parser.add_argument("--onboarding", action="store_true")
     parser.add_argument("--setup-step", type=int, default=-1)
     parser.add_argument("--trim", action="store_true")
     parser.add_argument("--mute", action="store_true")
@@ -57,14 +59,18 @@ def main():
     app.setOrganizationName("LocalMedia")
     app.setApplicationName("Player")
     app.setApplicationDisplayName("Плеер")
-    app.setApplicationVersion("0.2.1")
+    app.setApplicationVersion(__version__)
     assets = Path(__file__).parent / "assets"
+    if sys.platform != "darwin":
+        app.setWindowIcon(QIcon(str(assets / "Player.png")))
     for font in (assets / "fonts").glob("*.ttf"):
         QFontDatabase.addApplicationFont(str(font))
     app.setFont(QFont("Onest", 13))
     root = Path(args.data_dir or os.getenv("PLAYER_DATA_DIR") or
                 QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation))
     controller = Controller(Store(root))
+    if args.onboarding:
+        controller.update(onboarding=True)
     app.controller = controller
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("bridge", controller)

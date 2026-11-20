@@ -1,8 +1,12 @@
 {
-  "asset": ["Player.png", "Player.icns"],
+  "asset": [
+    "Player.png",
+    "Player.icns",
+    "Player.ico"
+  ],
   "kind": "authored application icon",
-  "construction": "Qt-rendered Lucide play glyph on a neutral rounded square; ICNS contains PNG sizes",
-  "source": "icons/play.svg",
+  "construction": "Qt-rendered Lucide audio-lines glyph from onboarding, on a neutral rounded square",
+  "source": "icons/audio-lines.svg",
   "source_license": "../../licenses/Lucide-ISC.txt",
   "generated_with_ai": false
 }

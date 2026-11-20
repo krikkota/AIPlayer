@@ -2,7 +2,7 @@
 
 Настольный плеер для видео и аудио с локальной расшифровкой русской речи, поиском по записи и обрезкой фрагментов.
 
-**[Скачать для Windows и macOS](https://github.com/krikkota/AIPlayer/releases/latest)** · [Сообщить о проблеме](https://github.com/krikkota/AIPlayer/issues)
+**[Скачать для Windows, macOS и Linux](https://github.com/krikkota/AIPlayer/releases/latest)** · [Сообщить о проблеме](https://github.com/krikkota/AIPlayer/issues)
 
 ## Установка
 
@@ -10,8 +10,9 @@
 
 | Система | Файл | Требования |
 | --- | --- | --- |
-| Windows | **AIPlayer-0.2.1-Windows-x64-Setup.exe** | Windows 10 22H2 / Windows 11, x64 |
-| macOS | **AIPlayer-0.2.1-macOS-arm64.dmg** | macOS 14+, Apple Silicon (серия M) |
+| Windows | **AIPlayer-0.2.2-Windows-x64-Setup.exe** | Windows 10 22H2 / Windows 11, x64 |
+| macOS | **AIPlayer-0.2.2-macOS-arm64.dmg** | macOS 14+, Apple Silicon (серия M) |
+| Linux | **AIPlayer-0.2.2-Linux-x64.tar.gz** | Ubuntu 24.04 x64 |
 
 ### Windows
 
@@ -23,13 +24,23 @@
 
 Приложение пока без Developer ID и нотариальной проверки Apple. macOS может заблокировать первый запуск. Если вы доверяете скачанному файлу, после попытки запуска откройте **Системные настройки → Конфиденциальность и безопасность → Всё равно открыть** и подтвердите запуск AIPlayer. Это отдельное разрешение для приложения; отключать защиту системы не нужно. [Инструкция Apple](https://support.apple.com/102445).
 
+### Linux
+
+Распакуйте архив целиком и запустите файл `AIPlayer` из распакованной папки. Из терминала это `./AIPlayer`. Проверено на Ubuntu 24.04 x64. Для запуска в X11 или XWayland могут понадобиться библиотеки Qt. Для Ubuntu установите их командой:
+
+```sh
+sudo apt install libegl1 libgl1 libopengl0 libxcb-cursor0 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-render-util0 libxcb-util1 libxcb-shape0 libxcb-xinput0
+```
+
 ### Первый запуск
 
 1. Приложение предложит загрузить модель распознавания **GigaAM, около 225 МБ**. После загрузки распознавание работает без интернета.
 2. По желанию подключите [Ollama](https://ollama.com/) для поиска по смыслу. Для обычной расшифровки и поиска слов она не нужна.
 3. Откройте или перетащите аудио- или видеофайл.
 
-Это ранняя версия приложения. Скачивайте файлы только из релизов этого репозитория. Версия 0.2.1 заменяет предыдущую; настройки и уже загруженные модели сохраняются.
+В настройке расшифровки можно отдельно загрузить **SaT INT8 (251 МБ)**. Плеер использует её на CPU для уточнения границ фраз после пауз, сохраняя слова и таймкоды. Переключатель находится в разделе «Модели и подключение». Модель хранится отдельно от приложения.
+
+Это ранняя версия приложения. Скачивайте файлы только из релизов этого репозитория. Версия 0.2.2 заменяет предыдущую; настройки и уже загруженные модели сохраняются.
 
 ![Первый запуск AIPlayer на Windows](docs/images/first-launch-windows.png)
 
@@ -66,7 +77,7 @@
 
 ## Другие платформы и разработка
 
-Одна кодовая база использует Python и Qt/PySide6 и рассчитана на macOS, Windows и Linux. В этом релизе готовы установщик Windows x64 и DMG macOS Apple Silicon. Пакетов Linux и macOS Intel пока нет.
+Одна кодовая база использует Python и Qt/PySide6 и рассчитана на macOS, Windows и Linux. В этом релизе есть установщик Windows x64, DMG для Mac с Apple Silicon и переносимый пакет для Ubuntu 24.04 x64. Сборки macOS Intel, Windows ARM и Linux ARM не входят в этот релиз.
 
 Для запуска исходников нужен Python 3.12:
 

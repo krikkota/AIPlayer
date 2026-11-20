@@ -46,17 +46,54 @@ def words_from_ctc(log_probs, vocab, offset: float):
     return [word for word in words if word["text"].strip()]
 
 
+SENTENCE_END = re.compile(r"""[.!?…]["»”’')\]]*$""")
+CLAUSE_END = re.compile(r"[,;:]$")
+LINKING_WORDS = frozenset(
+    "в во на за из от к ко до для по о об обо с со у без под над при про "
+    "через между перед и или но а что чтобы который которая которые".split()
+)
+
+
+def split_long_phrase(words):
+    """Choose a readable break in the latter half of a long phrase."""
+    size = len(words)
+    target = size * 0.75
+    candidates = range(max(1, size // 2), min(size, max(2, size * 9 // 10 + 1)))
+
+    def quality(index):
+        left, right = words[index - 1], words[index]
+        pause = right["start"] - left["end"]
+        if CLAUSE_END.search(left["text"]):
+            priority = 3
+        elif left["text"].casefold().lstrip("«\"(") in LINKING_WORDS:
+            priority = 0
+        elif pause >= 0.45:
+            priority = 2
+        else:
+            priority = 1
+        return priority, -abs(index - target)
+
+    return max(candidates, key=quality)
+
+
 def group_words(words):
     segments, group = [], []
+    group_end = 0.0
     for word in words:
-        if group and (word["start"] - group[-1]["end"] > 1.0 or
-                      word["end"] - group[0]["start"] > 8.0):
+        if group and word["start"] - group_end > 2.0:
             segments.append(make_segment(group))
             group = []
+        group_end = max(group_end, word["end"]) if group else word["end"]
         group.append(word)
-        if re.search(r"[.!?…]$", word["text"]) and len(group) >= 3:
+        duration = group_end - group[0]["start"]
+        if SENTENCE_END.search(word["text"]):
             segments.append(make_segment(group))
             group = []
+        elif len(group) > 1 and (duration >= 24 or len(group) >= 45):
+            cut = split_long_phrase(group)
+            segments.append(make_segment(group[:cut]))
+            group = group[cut:]
+            group_end = max(item["end"] for item in group)
     if group:
         segments.append(make_segment(group))
     return segments
@@ -65,8 +102,22 @@ def group_words(words):
 def make_segment(words):
     text = " ".join(x["text"] for x in words)
     text = re.sub(r"\s+([,.!?;:])", r"\1", text)
-    return {"start": round(words[0]["start"], 3), "end": round(words[-1]["end"], 3),
+    return {"start": round(min(word["start"] for word in words), 3),
+            "end": round(max(word["end"] for word in words), 3),
             "text": text, "words": words}
+
+
+def regroup_cached_segments(segments):
+    """Reuse word timings from prior builds when they cover all saved text."""
+    words = []
+    for segment in segments:
+        timed_words = segment.get("words")
+        if not timed_words or make_segment(timed_words)["text"] != segment["text"]:
+            return segments
+        words.extend(timed_words)
+    # Adjacent inference windows may overlap slightly. Keep the recognized word
+    # order and allow overlap instead of discarding the entire regrouping.
+    return group_words(words)
 
 
 def transcribe(audio_path: Path, model_path: Path, cancel, progress):

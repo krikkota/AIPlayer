@@ -58,27 +58,69 @@ def test_first_run_download_recovery_optional_ollama_and_first_file(tmp_path,mon
     try:
         QTest.qWait(100)
         assert c.state['onboarding'] and not ollama
-        assert find('onboardingContinue').property('text')=='Загрузить 225 МБ'
+        overlay = find('firstRunOverlay')
+        optional = find('onboardingSegmentation', overlay)
+        speech = find('downloadSpeechModel', overlay)
+        assert optional.isVisible()
+        assert optional.mapToScene(QPointF()).y() - speech.mapToScene(QPointF(0, speech.height())).y() >= 32
+        divider = find('phraseComparisonDivider', overlay)
+        assert divider.property('value') == 0.5
+        midpoint = divider.mapToScene(QPointF(divider.width() * 0.5, divider.height() * 0.65)).toPoint()
+        right = divider.mapToScene(QPointF(divider.width() * 0.85, divider.height() * 0.65)).toPoint()
+        QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, midpoint)
+        QTest.mouseMove(w, right)
+        QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, right)
+        assert divider.property('value') > 0.75
+        assert not c.state['satDownloading'] and not c.state['satEnabled']
+        assert find('downloadSpeechModel').property('text')=='Скачать модель · 225 МБ'
         def failed(*a):raise URLError('offline')
         monkeypatch.setattr('player.controller.models.download',failed)
-        click('onboardingContinue');wait(lambda:not c.state['setupBusy'])
-        assert 'интернет' in c.state['setupError'] and find('onboardingContinue').property('text')=='Повторить загрузку'
+        click('downloadSpeechModel');wait(lambda:not c.state['setupBusy'])
+        assert 'интернет' in c.state['setupError'] and find('downloadSpeechModel').property('text')=='Повторить загрузку'
         def pause(root,cancel,progress):
             folder=root/'models/gigaam-v3';folder.mkdir(parents=True,exist_ok=True)
             (folder/'model.int8.onnx.part').write_bytes(b'partial')
             progress(dict(fraction=.4,bytes=100,total=225000000,speed=1e6,label='Загрузка'))
             cancel.wait(2);check_cancel(cancel)
         monkeypatch.setattr('player.controller.models.download',pause)
-        click('onboardingContinue');wait(lambda:c.state['setupBytes']==100)
+        click('downloadSpeechModel');wait(lambda:c.state['setupBytes']==100)
         click('pauseModelDownload');wait(lambda:not c.state['setupBusy'])
         assert c.state['setupCanResume'] and not c.state['asrReady']
-        assert find('onboardingContinue').property('text')=='Продолжить загрузку'
+        assert find('downloadSpeechModel').property('text')=='Продолжить загрузку'
         def ready(root,cancel,progress):
             progress(dict(label='Проверяем целостность модели…'))
             return dict(path=str(root/'models/gigaam-v3'))
         monkeypatch.setattr('player.controller.models.download',ready)
-        click('onboardingContinue');wait(lambda:c.state['asrReady'])
+        click('downloadSpeechModel');wait(lambda:c.state['asrReady'])
         assert Store(tmp_path).settings['asr_path']
+        sat_installed = Event()
+        monkeypatch.setattr('player.controller.models.sat_installed', lambda root: sat_installed.is_set())
+
+        def install_sat(root, cancel, progress):
+            sat_installed.set()
+            return {"path": str(root / "models/sat-3l-sm-int8")}
+
+        monkeypatch.setattr('player.controller.models.download_sat', install_sat)
+        QTest.qWait(50)  # Let the first page relayout after the download status disappears.
+        download = find('downloadSegmentation', find('firstRunOverlay'))
+        assert find('standardPhraseExample', overlay).isVisible()
+        assert find('combinedPhraseExample', overlay).isVisible()
+        assert find('onboardingContinue').property('text') == 'Продолжить'
+        assert download.mapToScene(QPointF(0, 0)).y() < find('onboardingContinue').mapToScene(QPointF(0, 0)).y()
+        click('onboardingContinue')
+        assert c.state['step'] == 1 and not sat_installed.is_set()
+        click('onboardingBack')
+        assert c.state['step'] == 0 and download.isVisible()
+        QTest.mouseClick(w, Qt.LeftButton, Qt.NoModifier,
+                         download.mapToScene(QPointF(download.width()/2, download.height()/2)).toPoint())
+        wait(lambda: c.state['satEnabled'])
+        assert c.state['satInstalled'] and Store(tmp_path).settings['sat_enabled']
+        toggle = find('segmentationEnabled', find('firstRunOverlay'))
+        assert toggle.isVisible() and toggle.property('checked')
+        QTest.mouseClick(w, Qt.LeftButton, Qt.NoModifier,
+                         toggle.mapToScene(QPointF(toggle.width()/2, toggle.height()/2)).toPoint())
+        wait(lambda: not c.state['satEnabled'])
+        assert not Store(tmp_path).settings['sat_enabled']
         click('onboardingContinue')
         assert c.state['step']==1 and ollama and find('onboardingLaunchOllama').property('text')=='Установить Ollama'
         click('onboardingContinue')

@@ -13,7 +13,7 @@ Rectangle {
     Rectangle {
         id: surface
         width: Math.min(640, parent.width-48)
-        height: Math.min(overlay.config.step===0 ? 470 : 570, parent.height-48)
+        height: Math.min(570, parent.height-48)
         Behavior on height { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
         anchors.centerIn: parent
         color: "#101010"
@@ -69,50 +69,55 @@ Rectangle {
                 currentIndex: overlay.config.step
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                ColumnLayout {
-                    spacing: 16
-                    RowLayout {
-                        spacing: 14
-                        Image { source: assetRoot+"icons/audio-lines.svg"; sourceSize: Qt.size(28,28); Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
-                        ColumnLayout {
-                            spacing: 4
-                            Text { textFormat: Text.PlainText; text: "GigaAM"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 19; font.weight: Font.Medium }
-                            Text { textFormat: Text.PlainText; text: "Русская речь · локально · 225 МБ"; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12 }
+                ScrollView {
+                    id: speechSettings
+                    clip: true
+                    contentWidth: availableWidth
+                    ColumnLayout {
+                        width: speechSettings.availableWidth
+                        spacing: 16
+                        RowLayout {
+                            spacing: 14
+                            Image { source: assetRoot+"icons/audio-lines.svg"; sourceSize: Qt.size(28,28); Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
+                            ColumnLayout {
+                                spacing: 4
+                                Text { textFormat: Text.PlainText; text: "GigaAM"; color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 19; font.weight: Font.Medium }
+                                Text { textFormat: Text.PlainText; text: "Русская речь · локально · 225 МБ"; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12 }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Image { visible: overlay.config.asrReady; source: assetRoot+"icons/check.svg"; sourceSize: Qt.size(20,20); Layout.preferredWidth: 20; Layout.preferredHeight: 20 }
                         }
-                        Item { Layout.fillWidth: true }
-                        Image { visible: overlay.config.asrReady; source: assetRoot+"icons/check.svg"; sourceSize: Qt.size(20,20); Layout.preferredWidth: 20; Layout.preferredHeight: 20 }
-                    }
-                    Text { textFormat: Text.PlainText;
-                        text: overlay.config.asrReady ? "Совместимая модель уже найдена. Можно переходить к следующему шагу."
-                              : "Модель превращает речь в текст с временными метками. Загрузим её один раз или используем уже скачанную."
-                        color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 14; lineHeight: 1.5
-                        wrapMode: Text.WordWrap; Layout.fillWidth: true
-                    }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#28282a" }
-                    Text { textFormat: Text.PlainText;
-                        text: overlay.config.setupLabel
-                        color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 13; wrapMode: Text.WordWrap; Layout.fillWidth: true
-                    }
-                    ProgressBar {
-                        visible: overlay.config.setupBusy || overlay.config.asrChecking
-                        Layout.fillWidth: true; implicitHeight: 3
-                        indeterminate: overlay.config.setupFraction < 0
-                        value: Math.max(0,overlay.config.setupFraction)
-                        background: Rectangle { implicitHeight: 3; color: "#28282a"; radius: 2 }
-                        contentItem: Item {
-                            Rectangle { width: parent.width * (parent.parent.indeterminate ? .3 : parent.parent.visualPosition); height: 3; color: "#b9b1f0"; radius: 2 }
+                        Text { textFormat: Text.PlainText;
+                            text: overlay.config.asrReady ? "Совместимая модель уже найдена. Можно переходить к следующему шагу."
+                                  : "Модель превращает речь в текст с временными метками. Загрузим её один раз или используем уже скачанную."
+                            color: "#b6b6bd"; font.family: "Onest"; font.pixelSize: 14; lineHeight: 1.5
+                            wrapMode: Text.WordWrap; Layout.fillWidth: true
                         }
+                        Rectangle { Layout.fillWidth: true; height: 1; color: "#28282a" }
+                        Text { textFormat: Text.PlainText;
+                            text: overlay.config.setupLabel
+                            color: "#eeeef0"; font.family: "Onest"; font.pixelSize: 13; wrapMode: Text.WordWrap; Layout.fillWidth: true
+                        }
+                        ProgressBar {
+                            visible: overlay.config.setupBusy || overlay.config.asrChecking
+                            Layout.fillWidth: true; implicitHeight: 3
+                            indeterminate: overlay.config.setupFraction < 0
+                            value: Math.max(0,overlay.config.setupFraction)
+                            background: Rectangle { implicitHeight: 3; color: "#28282a"; radius: 2 }
+                            contentItem: Item {
+                                Rectangle { width: parent.width * (parent.parent.indeterminate ? .3 : parent.parent.visualPosition); height: 3; color: "#b9b1f0"; radius: 2 }
+                            }
+                        }
+                        RowLayout {
+                            visible: !overlay.config.asrReady && !overlay.config.asrChecking
+                            spacing: 10
+                            PButton { text: "Загрузить модель"; iconName: "download"; primary: true; enabled: !overlay.config.setupBusy; onClicked: bridge.downloadModel() }
+                            PButton { text: "Указать папку"; iconName: "folder-open"; enabled: !overlay.config.setupBusy; onClicked: bridge.chooseModelFolder() }
+                        }
+                        PButton { visible: overlay.config.setupBusy; text: "Отменить загрузку"; quiet: true; onClicked: bridge.cancelSetup() }
+                        Text { textFormat: Text.PlainText; visible: overlay.config.setupError.length>0; text: overlay.config.setupError; color: "#f0b9ae"; font.family: "Onest"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        SegmentationSetup { config: overlay.config; Layout.fillWidth: true }
                     }
-                    RowLayout {
-                        visible: !overlay.config.asrReady && !overlay.config.asrChecking
-                        spacing: 10
-                        PButton { text: "Загрузить модель"; iconName: "download"; primary: true; enabled: !overlay.config.setupBusy; onClicked: bridge.downloadModel() }
-                        PButton { text: "Указать папку"; iconName: "folder-open"; enabled: !overlay.config.setupBusy; onClicked: bridge.chooseModelFolder() }
-                    }
-                    PButton { visible: overlay.config.setupBusy; text: "Отменить загрузку"; quiet: true; onClicked: bridge.cancelSetup() }
-                    Text { textFormat: Text.PlainText; visible: overlay.config.setupError.length>0; text: overlay.config.setupError; color: "#f0b9ae"; font.family: "Onest"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                    Item { Layout.fillHeight: true }
-                    Text { textFormat: Text.PlainText; text: "Модель хранится отдельно от приложения. Ваши записи остаются на устройстве."; color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 }
                 ColumnLayout {
                     spacing: 13

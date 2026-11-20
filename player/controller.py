@@ -12,8 +12,8 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
-from . import asr, media, models
-from .jobs import Job
+from . import asr, media, models, segmentation
+from .jobs import Job, check_cancel
 from .ollama import Ollama, semantic_search
 from .storage import Store, atomic_json, media_key, read_json, read_transcript
 from .security import local_media_path
@@ -56,6 +56,9 @@ class Controller(QObject):
         self._audio = ""
         self._url = ""
         self._segments = []
+        self._base_segments = []
+        self._sat_download = None
+        self._sat_refinement = None
         self._rows = []
         self._transcript_model = TranscriptModel(self)
         self._peaks = []
@@ -71,6 +74,9 @@ class Controller(QObject):
             "setupBusy": False, "setupLabel": "Проверяем модель…", "setupFraction": -1.0,
             "setupCanResume": False, "setupBytes": 0, "setupTotal": 224895354, "setupSpeed": 0.0,
             "setupPhase": "checking", "ollamaInstalled": self.ollama_installed(),
+            "satInstalled": models.sat_installed(store.root), "satEnabled": store.settings["sat_enabled"],
+            "satDownloading": False, "satFraction": -1.0, "satDownloadMessage": "",
+            "satRefining": False, "satNotice": "",
             "setupError": "", "ollamaState": "unknown", "ollamaError": "", "models": [],
             "selectedModel": store.settings["semantic_model"], "selectedKind": store.settings["semantic_kind"],
             "title": "Плеер", "fileName": "", "status": "Откройте видео или аудио",
@@ -171,7 +177,8 @@ class Controller(QObject):
             self.update(status=value.get("label", label), fraction=value.get("fraction", -1.0))
             if "segments" in value:
                 self._segments = value["segments"]
-                self.update(transcriptPartial=True)
+                self._complete = False
+                self.update(transcriptReady=False, transcriptPartial=True)
                 self.rebuild_rows()
                 atomic_json(self.store.cache(self._key, "transcript.json"),
                             {"segments": self._segments, "complete": False})
@@ -250,7 +257,6 @@ class Controller(QObject):
             try:
                 return models.download(self.store.root, cancel, progress)
             except (urllib.error.URLError, TimeoutError) as error:
-                from .jobs import check_cancel
                 check_cancel(cancel)
                 raise ValueError("Не удалось связаться с сервером модели. Проверьте интернет и повторите: уже загруженная часть сохранена.") from error
         def progress(value):
@@ -266,6 +272,103 @@ class Controller(QObject):
     def cancelSetup(self):
         if hasattr(self, "_setup_job"):
             self._setup_job.cancel.set()
+
+    @Slot()
+    def downloadSegmentation(self):
+        if self._sat_download is not None:
+            return
+        self.update(satDownloading=True, satFraction=-1.0, satDownloadMessage="Подключаемся…", satNotice="")
+
+        def download(cancel, progress):
+            try:
+                return models.download_sat(self.store.root, cancel, progress)
+            except (urllib.error.URLError, TimeoutError) as error:
+                check_cancel(cancel)
+                raise ValueError("Проверьте интернет и повторите загрузку. Загруженная часть сохранена.") from error
+
+        def progress(value):
+            self.update(satFraction=value.get("fraction", -1.0), satDownloadMessage=value.get("label", ""))
+
+        def result(value):
+            self._sat_download = None
+            installed = models.sat_installed(self.store.root)
+            self.update(satDownloading=False, satInstalled=installed)
+            if value.get("cancelled"):
+                self.update(satDownloadMessage="Загрузка приостановлена. Её можно продолжить.")
+                return
+            self.update(satDownloadMessage="")
+            self.setSegmentationEnabled(True)
+
+        def failure(text):
+            self._sat_download = None
+            self.update(satDownloading=False, satDownloadMessage=text)
+
+        self._sat_download = self.job(download, result, progress, failure)
+
+    @Slot()
+    def pauseSegmentationDownload(self):
+        if self._sat_download is not None:
+            self._sat_download.cancel.set()
+
+    @Slot(bool)
+    def setSegmentationEnabled(self, enabled):
+        if enabled and not models.sat_installed(self.store.root):
+            return
+        self.store.update(sat_enabled=enabled)
+        self.update(satEnabled=enabled, satNotice="")
+        if enabled:
+            self.refineTranscript()
+        else:
+            self.cancelTranscriptRefinement()
+            if self._complete:
+                self.applyTranscriptLayout(self._base_segments)
+
+    def cancelTranscriptRefinement(self):
+        if self._sat_refinement is not None:
+            self._sat_refinement.cancel.set()
+            self._sat_refinement = None
+            self.update(satRefining=False)
+
+    def refineTranscript(self):
+        if (not self._complete or not self._base_segments or not self._state["satEnabled"]
+                or not self._state["satInstalled"] or self._sat_refinement is not None):
+            return
+        original = self._base_segments
+        generation = self._generation
+        self.update(satRefining=True, satNotice="")
+
+        def run(cancel, progress):
+            return {"segments": segmentation.refine(original, self.store.root, cancel)}
+
+        def current():
+            return self._generation == generation and self._sat_refinement is job
+
+        def result(value):
+            if current():
+                self._sat_refinement = None
+                self.update(satRefining=False)
+                if not value.get("cancelled"):
+                    self.applyTranscriptLayout(value["segments"])
+
+        def failure(text):
+            if current():
+                self._sat_refinement = None
+                self.update(satRefining=False, satNotice="SaT не смогла обработать текст. Используется обычное разбиение.")
+
+        job = self.job(run, result, error=failure, neural=True)
+        self._sat_refinement = job
+
+    def applyTranscriptLayout(self, segments):
+        if self._segments == segments:
+            return
+        self.clearMeaning()
+        self._segments = segments
+        self._selection = (-1, -1)
+        self._active = -1
+        self._hits = []
+        self.update(selectedStart=-1, selectedEnd=-1, activeRow=-1, searchIndex=-1)
+        self.rebuild_rows(reset=True)
+        self.updatePosition(self.player.position() / 1000)
 
     @Slot(int)
     def setStep(self, step):
@@ -377,6 +480,7 @@ class Controller(QObject):
         if self._operation:
             self._operation.cancel.set()
             self._operation = None
+        self.cancelTranscriptRefinement()
         self._generation += 1
         self._path = path.resolve()
         self._key = media_key(self._path)
@@ -384,7 +488,8 @@ class Controller(QObject):
         self._peaks = []
         self.waveformChanged.emit()
         cached = read_transcript(self.store.cache(self._key, "transcript.json"))
-        self._segments = cached.get("segments", [])
+        self._base_segments = asr.regroup_cached_segments(cached.get("segments", []))
+        self._segments = self._base_segments
         self._complete = cached.get("complete", False)
         self._query = ""
         self._semantic_mode = False
@@ -403,6 +508,8 @@ class Controller(QObject):
                     transcriptPartial=bool(self._segments) and not self._complete, activeRow=-1,
                     selectedStart=-1, selectedEnd=-1, searchCount=0, searchIndex=-1, searchHint="",
                     searchPerformed=False, searchQuery="", searchError="")
+        self.update(satNotice="")
+        self.refineTranscript()
         source, target = self._path, self.store.cache(self._key, "audio.wav")
         def ready(value):
             self._audio = value["audio"]
@@ -422,14 +529,17 @@ class Controller(QObject):
             self.settings()
             return
         audio, folder = Path(self._audio), Path(self._state["asrPath"])
+        self.cancelTranscriptRefinement()
         self.clearMeaning()
         def result(value):
             self._segments = value["segments"]
+            self._base_segments = self._segments
             self._complete = True
             atomic_json(self.store.cache(self._key, "transcript.json"), value)
             self.rebuild_rows()
             self.update(transcriptReady=True, transcriptPartial=False,
                         status="Расшифровка сохранена" if self._segments else "Речь не обнаружена")
+            self.refineTranscript()
         self.operation("transcribe", lambda cancel, progress: asr.transcribe(audio, folder, cancel, progress),
                        result, "Загружаем GigaAM…", neural=True)
 
@@ -524,6 +634,9 @@ class Controller(QObject):
             return
         if self._state["busy"]:
             self.update(meaningError="Дождитесь завершения текущей обработки или отмените её.")
+            return
+        if self._state["satRefining"]:
+            self.update(meaningError="Плеер ещё уточняет границы фраз. Попробуйте через несколько секунд.")
             return
         if not self._state["transcriptReady"]:
             self.update(meaningError="Сначала дождитесь готовой расшифровки.")
@@ -642,18 +755,23 @@ class Controller(QObject):
 
     @Slot()
     def exportTranscript(self):
-        if not self._segments:
+        if (self._path is None or not self._complete or not self._segments
+                or self._state["operation"] == "transcribe" or self._state["satRefining"]):
             return
+        source = self._path
+        segments = self._segments
+        text_filter = "Текст с таймкодами (*.txt)"
+        subtitle_filter = "Субтитры SRT (*.srt)"
         name, selected = QFileDialog.getSaveFileName(None, "Сохранить расшифровку",
-            str(self._path.with_suffix(".srt")), "Субтитры SRT (*.srt);;Текст (*.txt)")
+            str(source.with_name(f"{source.stem} — расшифровка")), f"{text_filter};;{subtitle_filter}")
         if not name:
             return
         target = Path(name)
-        if target == self._path or target.exists():
-            self.update(error="Выберите новое имя файла для расшифровки.")
-            return
+        if target.suffix.lower() not in {".txt", ".srt"}:
+            suffix = ".srt" if selected == subtitle_filter else ".txt"
+            target = target.with_name(target.name + suffix)
         if target.suffix.lower() == ".txt":
-            text = "\n\n".join(f"{self.formatTime(s['start'])}  {s['text']}" for s in self._segments)
+            text = "\n\n".join(f"{self.formatTime(s['start'])}  {s['text']}" for s in segments) + "\n"
         else:
             def timestamp(seconds):
                 millis = max(0, round(seconds * 1000))
@@ -662,11 +780,13 @@ class Controller(QObject):
                 secs, ms = divmod(rest, 1000)
                 return f"{hours:02}:{minutes:02}:{secs:02},{ms:03}"
             text = "\n\n".join(f"{i+1}\n{timestamp(s['start'])} --> {timestamp(s['end'])}\n{s['text']}"
-                               for i, s in enumerate(self._segments)) + "\n"
+                               for i, s in enumerate(segments)) + "\n"
         try:
             with target.open("x", encoding="utf-8") as stream:
                 stream.write(text)
-            self.update(status="Расшифровка экспортирована")
+            self.update(status="Расшифровка экспортирована", lastExport=str(target))
+        except FileExistsError:
+            self.update(error="Файл уже существует. Выберите новое имя для расшифровки.")
         except OSError as error:
             self.update(error=str(error))
 

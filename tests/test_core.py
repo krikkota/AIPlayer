@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from player.asr import words_from_ctc, group_words
+from player.asr import words_from_ctc, group_words, make_segment, regroup_cached_segments
 from player.jobs import Cancelled
 from player.models import digest_file, resolve_files
 from player.ollama import Ollama, merge_hits, semantic_search
@@ -31,6 +31,54 @@ def test_phrase_boundaries_keep_pause_and_sentence():
     rows = group_words(words)
     assert [r["text"] for r in rows] == ["Привет мир снова.", "Позже"]
     assert rows[1]["start"] == 5
+
+
+def test_regroup_cached_sentence_crossing_old_duration_limit():
+    texts = "У нас прорабатывался вопрос, э-ээ, формулировку правильную техническую, я не знаю, как она называется, условно добавление прав доступа.".split()
+    words = [dict(text=text, start=247.0 + i, end=247.75 + i)
+             for i, text in enumerate(texts)]
+    # A later pair overlaps at an inference window seam and must not block
+    # regrouping earlier in the recording.
+    following = [dict(text="Дальше", start=270.2, end=270.4),
+                 dict(text="продолжим.", start=270.0, end=270.8)]
+    cached = [make_segment(words[:7]), make_segment(words[7:]), make_segment(following)]
+    rows = regroup_cached_segments(cached)
+    assert [(row["start"], row["text"]) for row in rows] == [
+        (247.0, " ".join(texts)), (270.0, "Дальше продолжим.")]
+    assert rows[0]["words"] == words
+    assert rows[1]["words"] == following
+    untimed = [cached[0], {key: cached[1][key] for key in ("start", "end", "text")}]
+    assert regroup_cached_segments(untimed) == untimed
+
+
+def test_phrase_continues_after_brief_hesitation():
+    words = [dict(text="Получать", start=0.0, end=0.5),
+             dict(text="отчёты.", start=2.06, end=2.6)]
+    assert [row["text"] for row in group_words(words)] == ["Получать отчёты."]
+
+
+def test_long_phrase_breaks_at_clause_and_keeps_word_timings():
+    tokens = ["слово"] * 30
+    tokens[17] = "оборот,"
+    tokens[22] = "пояснение:"
+    tokens[-1] = "конец."
+    words = [dict(text=text, start=float(i), end=i + 0.9)
+             for i, text in enumerate(tokens)]
+
+    rows = group_words(words)
+    assert len(rows) == 2
+    assert rows[0]["text"].endswith("оборот,")
+    assert rows[1]["start"] == words[18]["start"]
+    assert [word for row in rows for word in row["words"]] == words
+
+
+def test_finished_sentence_stays_intact_with_late_comma():
+    tokens = ["слово"] * 23
+    tokens[20] = "оборот,"
+    tokens[-1] = "конец."
+    words = [dict(text=text, start=float(i), end=i + 0.9)
+             for i, text in enumerate(tokens)]
+    assert len(group_words(words)) == 1
 
 
 def test_atomic_state_survives_reload_and_unicode(tmp_path):

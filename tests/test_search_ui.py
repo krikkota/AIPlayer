@@ -6,12 +6,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QObject, QPointF, Qt, QUrl, QEventLoop, QTimer
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QUrl, QEventLoop, QTimer
+from PySide6.QtGui import QFontDatabase, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 import shiboken6
 
 from player.controller import Controller
@@ -152,6 +152,62 @@ def test_search_field_arrows_keyboard_empty_and_partial_transcript(tmp_path, mon
     window = engine.rootObjects()[0]
     try:
         QTest.qWait(100)
+        transcript = window.findChild(QQuickItem, "transcriptView")
+        pause = window.findChild(QObject, "transcriptFollowPause")
+        motion = window.findChild(QObject, "transcriptFollowMotion")
+        assert pause.property("interval") == 4000
+        initial_scroll = transcript.property("contentY")
+        for second in range(17, 36, 2):
+            controller.updatePosition(second)
+            if motion.property("running"):
+                break
+        assert motion.property("running")
+        assert abs(transcript.property("contentY") - initial_scroll) < 1
+        QTest.qWait(90)
+        assert transcript.property("contentY") > initial_scroll
+
+        point = transcript.mapToScene(QPointF(45, 45))
+        wheel = QWheelEvent(point, point, QPoint(), QPoint(0, -120),
+                            Qt.NoButton, Qt.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+        QApplication.sendEvent(window, wheel)
+        QTest.qWait(100)
+        assert pause.property("running") and not motion.property("running")
+        resume = window.findChild(QQuickItem, "transcriptFollowResume")
+        countdown = window.findChild(QQuickItem, "transcriptFollowCountdown")
+        button_width = resume.width()
+        assert countdown.opacity() == 0
+        QApplication.sendEvent(window, wheel)
+        QTest.qWait(100)
+        assert countdown.opacity() == 0
+        for _ in range(20):
+            if countdown.opacity() > 0.95:
+                break
+            QTest.qWait(25)
+        assert countdown.opacity() > 0.95 and "4 с" in countdown.property("text")
+        assert resume.width() == button_width
+        for _ in range(30):
+            if "3 с" in countdown.property("text"):
+                break
+            QTest.qWait(50)
+        assert "3 с" in countdown.property("text")
+        controller.updatePosition(1)
+        assert not motion.property("running")
+        pause.setProperty("interval", 180)
+        for _ in range(25):
+            if not pause.property("running") and not motion.property("running"):
+                break
+            QTest.qWait(40)
+        assert not pause.property("running")
+        assert not resume.isVisible()
+        assert motion.property("duration") >= 420
+        assert abs(transcript.property("contentY") - initial_scroll) < 1
+
+        window.setProperty("followText", False)
+        controller.updatePosition(35)
+        QTest.qWait(100)
+        assert abs(transcript.property("contentY") - initial_scroll) < 1
+        controller.updatePosition(1)
+        window.setProperty("followText", True)
         for name in ["transportMain", "transportOptions"]:
             group = window.findChild(QQuickItem, name)
             buttons = [item for item in group.childItems() if item.property("iconName") is not None]
@@ -175,6 +231,26 @@ def test_search_field_arrows_keyboard_empty_and_partial_transcript(tmp_path, mon
             point = item.mapToScene(QPointF(item.width()/2, item.height()/2)).toPoint()
             QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
             QTest.qWait(50)
+        controller._path = tmp_path / "запись.mp4"
+        controller._complete = True
+        export_path = tmp_path / "весь текст"
+        save_formats = iter((0, 1, 0))
+
+        def save_file(parent, title, suggestion, filters):
+            return str(export_path), filters.split(";;")[next(save_formats)]
+
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", save_file)
+        click("saveTranscript")
+        plain_text = export_path.with_suffix(".txt").read_text(encoding="utf-8")
+        assert "00:01  Срок и срок." in plain_text
+        assert "Нейтральная фраза" in plain_text  # active search does not filter the export
+        click("saveTranscript")
+        subtitles = export_path.with_suffix(".srt").read_text(encoding="utf-8")
+        assert "00:00:01,000 --> 00:00:03,000\nСрок и срок." in subtitles
+        click("saveTranscript")
+        assert "уже существует" in controller.state["error"]
+        assert export_path.with_suffix(".txt").read_text(encoding="utf-8") == plain_text
+        controller.dismissError()
         click("nextResult")
         assert controller.state["searchIndex"] == 1 and seeks[-1] == 2000
         click("previousResult")
@@ -196,6 +272,8 @@ def test_search_field_arrows_keyboard_empty_and_partial_transcript(tmp_path, mon
         assert not window.findChild(QObject, "nextResult").property("enabled")
         controller.update(busy=True, operation="transcribe", transcriptPartial=True)
         assert feedback.property("visible") and "Распознавание продолжается" in feedback.property("text")
+        assert not find_item("saveTranscript").isVisible()
+        controller.exportTranscript()  # would open the exhausted dialog fixture if not guarded
         controller._segments.append({"start": 53, "end": 55, "text": "Здесь неттакойфразы"})
         controller.rebuild_rows()
         assert controller.state["searchCount"] == 1  # new ASR output refreshes an existing query
@@ -315,6 +393,29 @@ def test_search_field_arrows_keyboard_empty_and_partial_transcript(tmp_path, mon
         QTest.qWait(100)
         assert not controller.state["meaningPerformed"] and not controller.meaningResults
         assert "остановлен" in controller.state["meaningNotice"]
+
+        # A distant return fades briefly before showing the current phrase.
+        click("transcriptTab")
+        window.setProperty("followText", False)
+        controller._segments.extend(
+            {"start": 100 + i * 2, "end": 101 + i * 2, "text": "Дальняя строка расшифровки."}
+            for i in range(100)
+        )
+        controller.rebuild_rows()
+        controller.updatePosition(1)
+        controller.selectRow(len(controller._segments) - 1, False, seek=False)
+        distant_scroll = transcript.property("contentY")
+        assert distant_scroll > 2 * transcript.height()
+        transition = window.findChild(QObject, "transcriptFollowTransition")
+        window.setProperty("followText", True)
+        assert transition.property("running") and transcript.property("contentY") == distant_scroll
+        QTest.qWait(450)
+        assert not transition.property("running")
+        assert transcript.property("contentItem").opacity() == 1
+        current_row = next(item for item in transcript.property("contentItem").childItems()
+                           if item.property("index") == controller.state["activeRow"])
+        top = current_row.mapToItem(transcript, QPointF()).y()
+        assert -1 <= top and top + current_row.height() <= transcript.height() + 1
     finally:
         controller.shutdown()
         for root in engine.rootObjects():

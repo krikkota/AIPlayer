@@ -26,7 +26,7 @@ ApplicationWindow {
     property bool followText: true
     property bool videoOnly: false
     property bool previewing: false
-    property int lastActiveRow: -1
+    property int lastSpokenRow: -1
     readonly property bool hasQuery: !semantic && search.text.trim().length > 0
     readonly property bool resultsCurrent: s.searchQuery === search.text.trim() && s.searchPerformed
     readonly property bool playbackKeysAllowed: !s.onboarding && !s.settingsOpen && !meaning.settingsVisible && !volumePopup.visible && !speedMenu.visible && !transcriptMenu.visible && !trimStart.popupVisible && !trimEnd.popupVisible &&
@@ -67,12 +67,20 @@ ApplicationWindow {
         root.semantic = useMeaning
         bridge.setSearchSection(useMeaning)
         if (!useMeaning && s.selectedStart >= 0)
-            Qt.callLater(() => transcript.positionViewAtIndex(s.selectedStart, ListView.Contain))
+            Qt.callLater(() => transcript.revealRow(s.selectedStart))
     }
     function focusTextSearch() { root.selectSection(false); search.forceActiveFocus() }
     function navigateSearch(direction) {
         if (root.semantic) bridge.navigateMeaning(direction)
         else bridge.navigateHit(direction)
+    }
+    onFollowTextChanged: {
+        if (followText)
+            transcript.resumeFollowing()
+        else {
+            followPause.stop()
+            transcript.stopFollowingMotion()
+        }
     }
     Shortcut { sequence: "Ctrl+O"; enabled:!s.onboarding&&!s.settingsOpen; onActivated: bridge.openDialog() }
     Shortcut { sequence: "Meta+O"; enabled:!s.onboarding&&!s.settingsOpen; onActivated: bridge.openDialog() }
@@ -97,11 +105,12 @@ ApplicationWindow {
         target: bridge
         function onSeekRequested(milliseconds) { player.setPosition(milliseconds) }
         function onClipRequested(start,end) { root.setClip(start,end);root.trimOpen=true }
-        function onRowRevealRequested(index) { if(!root.semantic) {transcript.forceLayout();transcript.positionViewAtIndex(index,ListView.Contain)} }
+        function onRowRevealRequested(index) { if (!root.semantic) transcript.revealRow(index) }
         function onChanged() {
-            if (!root.semantic && followText && s.activeRow!==root.lastActiveRow && s.activeRow>=0 && !transcript.moving)
-                transcript.positionViewAtIndex(s.activeRow,ListView.Contain)
-            root.lastActiveRow=s.activeRow
+            if (s.activeRow < 0 || s.activeRow === root.lastSpokenRow)
+                return
+            root.lastSpokenRow = s.activeRow
+            transcript.followRow(s.activeRow)
         }
     }
     Connections {
@@ -111,6 +120,9 @@ ApplicationWindow {
         }
         function onPlaybackStateChanged() { if(player.playbackState!==MediaPlayer.PlayingState) root.previewing=false }
         function onSourceChanged() {
+            followPause.stop()
+            transcript.stopFollowingMotion()
+            root.lastSpokenRow = -1
             root.trimOpen=false;root.previewing=false;root.clipStart=0;root.clipEnd=60
             search.text="";meaning.queryText="";root.selectSection(false);root.contentItem.forceActiveFocus()
         }
@@ -353,7 +365,6 @@ ApplicationWindow {
                         }
                         PButton{iconName:"ellipsis";quiet:true;hint:"Действия с расшифровкой";onClicked:transcriptMenu.open()
                             Menu{id:transcriptMenu
-                                MenuItem{text:"Сохранить расшифровку…";enabled:bridge.rows.length>0;onTriggered:bridge.exportTranscript()}
                                 MenuItem{text:"Копировать текст";enabled:bridge.rows.length>0;onTriggered:bridge.copyTranscript()}
                                 MenuItem{text:"Распознать заново";enabled:s.hasMedia && !s.busy;onTriggered:bridge.transcribe()}
                                 MenuItem{text:"Выделить фразу для обрезки";enabled:s.selectedStart>=0;onTriggered:bridge.trimSelection()}
@@ -362,7 +373,21 @@ ApplicationWindow {
                             }
                         }
                     }
-                    Text { textFormat: Text.PlainText; visible: !root.semantic; text:s.transcriptReady?"Русский · Готово":s.transcriptPartial?"Русский · Распознаём…":s.operation==="transcribe"?"Русский · Подготовка…":"Появится после распознавания";color:"#a1a1aa";font.family:"Onest";font.pixelSize:12;Layout.fillWidth:true }
+                    RowLayout {
+                        visible: !root.semantic
+                        Layout.fillWidth: true
+                        Text {
+                            textFormat: Text.PlainText
+                            text: s.satRefining ? "Уточняем границы фраз…" : s.operation === "transcribe"
+                                ? (s.transcriptPartial ? "Русский · Распознаём…" : "Русский · Подготовка…")
+                                : s.transcriptReady
+                                  ? (transcript.count > 0 ? "Русский · Готово" : "Речь не обнаружена")
+                                  : s.transcriptPartial ? "Неполная расшифровка" : "Появится после распознавания"
+                            color: "#a1a1aa"; font.family: "Onest"; font.pixelSize: 12
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                    }
                     PField{
                         id:search;objectName:"searchField";Layout.fillWidth:true
                         visible: !root.semantic
@@ -396,7 +421,155 @@ ApplicationWindow {
                         Layout.fillWidth:true;Layout.fillHeight:true
                         clip:true;spacing:6
                         model:bridge.transcriptModel
-                        ScrollBar.vertical:ScrollBar{policy:ScrollBar.AsNeeded}
+                        cacheBuffer: height
+                        readonly property bool manuallyScrolling: moving || transcriptBar.pressed
+                        property double followDeadline: 0
+                        property int followSecondsLeft: 0
+                        property bool showFollowCountdown: false
+
+                        function stopFollowingMotion() {
+                            followMotion.stop()
+                            if (followTransition.running) {
+                                followTransition.stop()
+                                contentItem.opacity = 1
+                            }
+                        }
+
+                        function revealRow(index) {
+                            stopFollowingMotion()
+                            forceLayout()
+                            positionViewAtIndex(index, ListView.Contain)
+                        }
+
+                        function pauseForManualScroll() {
+                            stopFollowingMotion()
+                            if (root.followText)
+                                restartFollowDelay()
+                        }
+
+                        function restartFollowDelay() {
+                            followDeadline = Date.now() + followPause.interval
+                            showFollowCountdown = false
+                            countdownReveal.restart()
+                            followPause.restart()
+                        }
+
+                        function updateFollowCountdown() {
+                            followSecondsLeft = Math.max(1, Math.ceil((followDeadline - Date.now()) / 1000))
+                        }
+
+                        function resumeFollowing() {
+                            followPause.stop()
+                            if (manuallyScrolling) {
+                                pauseForManualScroll()
+                                return
+                            }
+                            followRow(root.lastSpokenRow, true)
+                        }
+
+                        function followRow(index, returning) {
+                            if (!root.followText || followPause.running || manuallyScrolling
+                                    || followTransition.running || !visible || index < 0 || index >= count)
+                                return
+
+                            const item = itemAtIndex(index)
+                            if (!item) {
+                                // Qt positions distant rows once their variable heights are known.
+                                followMotion.stop()
+                                if (returning)
+                                    followTransition.start()
+                                else
+                                    positionViewAtIndex(index, ListView.Contain)
+                                return
+                            }
+                            const readingInset = Math.min(height * 0.28, Math.max(0, height - item.height - 12))
+                            const top = item.y - contentY
+                            const bottom = top + item.height
+                            if (top >= 0 && bottom <= height * 0.76)
+                                return
+                            const minimum = originY
+                            const maximum = minimum + Math.max(0, contentHeight - height)
+                            const target = Math.max(minimum, Math.min(maximum, item.y - readingInset))
+                            const distance = Math.abs(target - contentY)
+                            if (distance < 1 || (followMotion.running && Math.abs(target - followMotion.to) < 1))
+                                return
+                            followMotion.stop()
+                            followMotion.from = contentY
+                            followMotion.to = target
+                            followMotion.easing.type = returning ? Easing.InOutCubic : Easing.OutCubic
+                            followMotion.duration = returning
+                                ? Math.round(Math.min(680, 420 + distance * 0.35))
+                                : Math.round(Math.min(500, 260 + distance * 0.35))
+                            followMotion.start()
+                        }
+
+                        onMovementStarted: pauseForManualScroll()
+                        onMovementEnded: if (followPause.running) restartFollowDelay()
+                        onVisibleChanged: if (!visible) stopFollowingMotion()
+                        Keys.onPressed: event => {
+                            if ([Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End].includes(event.key))
+                                transcript.pauseForManualScroll()
+                        }
+                        WheelHandler {
+                            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                            blocking: false
+                            target: null
+                            onWheel: transcript.pauseForManualScroll()
+                        }
+                        ScrollBar.vertical: ScrollBar {
+                            id: transcriptBar
+                            policy: ScrollBar.AsNeeded
+                            onPressedChanged: transcript.pauseForManualScroll()
+                        }
+                        Timer {
+                            id: followPause
+                            objectName: "transcriptFollowPause"
+                            interval: 4000
+                            onTriggered: transcript.resumeFollowing()
+                        }
+                        Timer {
+                            id: countdownReveal
+                            interval: 220
+                            onTriggered: {
+                                transcript.updateFollowCountdown()
+                                transcript.showFollowCountdown = followPause.running && !transcript.manuallyScrolling
+                            }
+                        }
+                        Timer {
+                            interval: 100
+                            repeat: true
+                            running: followPause.running && transcript.showFollowCountdown && !transcript.manuallyScrolling
+                            onTriggered: transcript.updateFollowCountdown()
+                        }
+                        NumberAnimation {
+                            id: followMotion
+                            objectName: "transcriptFollowMotion"
+                            target: transcript
+                            property: "contentY"
+                            easing.type: Easing.OutCubic
+                        }
+                        SequentialAnimation {
+                            id: followTransition
+                            objectName: "transcriptFollowTransition"
+                            NumberAnimation {
+                                target: transcript.contentItem; property: "opacity"; to: 0
+                                duration: 120; easing.type: Easing.InCubic
+                            }
+                            ScriptAction {
+                                script: {
+                                    const index = root.lastSpokenRow
+                                    transcript.forceLayout()
+                                    if (index === 0)
+                                        transcript.positionViewAtBeginning()
+                                    else if (index > 0 && index < transcript.count)
+                                        transcript.positionViewAtIndex(index, ListView.Center)
+                                }
+                            }
+                            NumberAnimation {
+                                target: transcript.contentItem; property: "opacity"; to: 1
+                                duration: 200; easing.type: Easing.OutCubic
+                            }
+                        }
                         delegate:ItemDelegate{
                             id:row
                             required property var record
@@ -421,15 +594,16 @@ ApplicationWindow {
                             anchors.centerIn:parent;width:parent.width-30;spacing:14
                             Image{source:assetRoot+"icons/file-text.svg";sourceSize:Qt.size(27,27);Layout.preferredWidth:27;Layout.preferredHeight:27;opacity:.55;Layout.alignment:Qt.AlignHCenter}
                             Text{ textFormat: Text.PlainText;text:s.operation==="transcribe"?"Распознаём первые фразы…":s.hasMedia?"Здесь будет текст записи":"Текст рядом с записью";color:"#b6b6bd";font.family:"Onest";font.pixelSize:14;wrapMode:Text.WordWrap;Layout.fillWidth:true;horizontalAlignment:Text.AlignHCenter}
-                            Text{ textFormat: Text.PlainText;text:"Нажмите на фразу — плеер перейдёт\nк соответствующему моменту.";color:"#a1a1aa";font.family:"Onest";font.pixelSize:12;lineHeight:1.5;horizontalAlignment:Text.AlignHCenter;Layout.alignment:Qt.AlignHCenter}
+                            Text{ textFormat: Text.PlainText;text:"Здесь появится текст, когда плеер распознает речь.";color:"#a1a1aa";font.family:"Onest";font.pixelSize:12;lineHeight:1.5;horizontalAlignment:Text.AlignHCenter;Layout.alignment:Qt.AlignHCenter}
                             PButton{visible:s.hasMedia&&!s.busy;text:s.asrReady?"Распознать речь":"Настроить распознавание";onClicked:s.asrReady?bridge.transcribe():bridge.settings();Layout.alignment:Qt.AlignHCenter}
                         }
                     }
                     RowLayout{
                         visible: !root.semantic
-                        Layout.fillWidth:true;spacing:9
+                        Layout.fillWidth:true;spacing:6
                         Switch{
-                            id:follow;checked:true;onToggled:root.followText=checked
+                            id:follow;checked:root.followText;onToggled:root.followText=checked
+                            objectName:"transcriptFollowSwitch"
                             Accessible.name:"Следовать за воспроизведением"
                             implicitWidth:36;implicitHeight:24
                             indicator:Rectangle{
@@ -437,9 +611,68 @@ ApplicationWindow {
                                 Rectangle{x:follow.checked?16:3;y:3;width:14;height:14;radius:7;color:"#f2eff9";Behavior on x{NumberAnimation{duration:240;easing.type:Easing.OutCubic}}}
                             }
                         }
-                        Text{ textFormat: Text.PlainText;text:"Следовать за записью";color:"#b6b6bd";font.family:"Onest";font.pixelSize:12;Layout.fillWidth:true}
+                        Text{ visible:!followPause.running; textFormat: Text.PlainText;text:"Следовать за записью";color:"#b6b6bd";font.family:"Onest";font.pixelSize:12;Layout.fillWidth:true}
+                        PButton {
+                            id: resumeFollow
+                            objectName: "transcriptFollowResume"
+                            visible: followPause.running
+                            text: "Автопрокрутка"
+                            hint: "Вернуться к текущей фразе сейчас"
+                            Accessible.name: transcript.showFollowCountdown
+                                ? hint + ". Автопрокрутка через " + transcript.followSecondsLeft + " с" : hint
+                            quiet: true
+                            font.pixelSize: 12
+                            leftPadding: 5
+                            rightPadding: 5
+                            implicitWidth: resumeLabel.implicitWidth + countdownMetrics.reservedWidth + leftPadding + rightPadding
+                            implicitHeight: 28
+                            FontMetrics {
+                                id: countdownMetrics
+                                font: resumeFollow.font
+                                readonly property real reservedWidth: advanceWidth(" через 4 с")
+                            }
+                            contentItem: Item {
+                                Row {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    Text {
+                                        id: resumeLabel
+                                        textFormat: Text.PlainText
+                                        text: resumeFollow.text
+                                        font: resumeFollow.font
+                                        color: "#eeeef0"
+                                    }
+                                    Text {
+                                        objectName: "transcriptFollowCountdown"
+                                        textFormat: Text.PlainText
+                                        text: " через " + transcript.followSecondsLeft + " с"
+                                        font: resumeFollow.font
+                                        color: "#b6b6bd"
+                                        opacity: transcript.showFollowCountdown && !transcript.manuallyScrolling ? 1 : 0
+                                        Behavior on opacity {
+                                            NumberAnimation { duration: 130; easing.type: Easing.OutCubic }
+                                        }
+                                    }
+                                }
+                            }
+                            onClicked: {
+                                transcript.cancelFlick()
+                                transcript.resumeFollowing()
+                            }
+                        }
+                        Item { visible: followPause.running; Layout.fillWidth: true }
                         PButton{objectName:"previousResult";iconName:"chevron-left";implicitWidth:36;hint:root.hasQuery?"Предыдущий результат · Shift+Enter":"Предыдущая фраза";enabled:root.hasQuery?root.resultsCurrent&&s.searchCount>0:bridge.rows.length>0;onClicked:bridge.navigateTranscript(-1)}
                         PButton{objectName:"nextResult";iconName:"chevron-right";implicitWidth:36;hint:root.hasQuery?"Следующий результат · Enter":"Следующая фраза";enabled:root.hasQuery?root.resultsCurrent&&s.searchCount>0:bridge.rows.length>0;onClicked:bridge.navigateTranscript(1)}
+                        PButton {
+                            objectName: "saveTranscript"
+                            visible: s.transcriptReady && s.operation !== "transcribe" && transcript.count > 0
+                            enabled: !s.satRefining
+                            circular: true
+                            iconName: "download"
+                            hint: "Сохранить расшифровку"
+                            Layout.leftMargin: 3
+                            onClicked: bridge.exportTranscript()
+                        }
                     }
                 }
             }

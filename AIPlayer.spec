@@ -3,8 +3,10 @@ from pathlib import Path
 import sys
 import re
 import subprocess
+import tomllib
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 import imageio_ffmpeg
+import tokenizers  # Verify the optional model's local runtime is available at build time.
 
 root = Path(SPECPATH)
 datas = [(str(root / "player/qml"), "player/qml"),
@@ -69,6 +71,9 @@ def needed_path(path):
         return False
     match = re.search(r"(?:lib)?Qt6(\w+)(?:\.dll|\.so)", name)
     if match and match.group(1).lower() not in qt_modules_lower:
+        if sys.platform.startswith("linux"):
+            # Keep the ELF runtime dependencies of platform and QML plugins.
+            return not match.group(1).startswith("WebEngine")
         return False
     if "/Qt/translations/" in name:
         return name.endswith(("_ru.qm", "_en.qm"))
@@ -120,9 +125,10 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="AIPlayer", debug=Fals
           icon=str(root / "player/assets/Player.icns") if sys.platform == "darwin" else str(root / "player/assets/Player.ico") if sys.platform == "win32" else None)
 collection = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="AIPlayer")
 if sys.platform == "darwin":
+    version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
     app = BUNDLE(collection, name="AIPlayer.app", icon=str(root / "player/assets/Player.icns"),
         bundle_identifier="local.aiplayer.desktop", info_plist={
-            "CFBundleDisplayName": "AIPlayer", "CFBundleShortVersionString": "0.2.1",
+            "CFBundleDisplayName": "AIPlayer", "CFBundleShortVersionString": version,
             "NSHighResolutionCapable": True, "LSMinimumSystemVersion": "14.0",
             "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
             "CFBundleDocumentTypes": [{"CFBundleTypeName": "Audio and Video", "CFBundleTypeRole": "Viewer",
