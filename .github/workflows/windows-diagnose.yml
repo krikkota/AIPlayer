@@ -1,35 +1,103 @@
-name: Diagnose installed Windows release
+name: Verify published Windows release
 on:
   workflow_dispatch:
 permissions:
   contents: read
-  actions: read
 jobs:
-  diagnose:
+  verify:
     runs-on: windows-2022
-    timeout-minutes: 10
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [clean, upgrade]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
           architecture: x64
-      - name: Download exact shipped installer
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download 43955651055 --repo krikkota/AIPlayer --name AIPlayer-Windows-installer --dir previous-release
-      - name: Verify installer and reproduce startup
+      - name: Download the public release installers and verify SHA256
         shell: pwsh
         run: |
-          $file = 'previous-release/AIPlayer-0.2.0-Windows-x64-Setup.exe'
-          if ((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd0e834954a0e8fe401396f39ce96e5bc6dd91c0a053ee9afbf0acb58addf8ede') { throw 'Installer checksum mismatch' }
-          python packaging/check_windows_startup.py --installer $file --report-root work/windows-repro
+          New-Item -ItemType Directory -Path work/release-check/ -Force | Out-Null
+          $releases = @{ '0.2.2' = 'f9de3f32e2c32d6d5be884d16203042b10ced9360d3aa1762bc16ed3373f8447' }
+          if ('${{ matrix.scenario }}' -eq 'upgrade') {
+            $releases['0.2.1'] = '40762875496b904db6612ab87fc928b26be4a00078f8ad0a355dba24b3ffba51'
+          }
+          foreach ($version in $releases.Keys) {
+            $name = "AIPlayer-$version-Windows-x64-Setup.exe"
+            $file = "work/release-check/$name"
+            Invoke-WebRequest "https://github.com/krikkota/AIPlayer/releases/download/v$version/$name" -OutFile $file
+            if ((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $releases[$version]) {
+              throw "SHA256 mismatch for $name"
+            }
+          }
+      - name: Install 0.2.2 on a clean machine and render the first window
+        if: matrix.scenario == 'clean'
+        run: python packaging/check_windows_startup.py --installer work/release-check/AIPlayer-0.2.2-Windows-x64-Setup.exe --report-root work/windows-test/clean
+      - name: Upgrade 0.2.1 in place and verify user data
+        if: matrix.scenario == 'upgrade'
+        shell: pwsh
+        run: |
+          $report = (New-Item -ItemType Directory -Force -Path work/windows-test/upgrade).FullName
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs/AIPlayer'
+          $exe = Join-Path $installDir 'AIPlayer.exe'
+          $profile = Join-Path $env:LOCALAPPDATA 'LocalMedia/Player'
+          $shortcut = Join-Path $env:APPDATA 'Microsoft/Windows/Start Menu/Programs/AIPlayer.lnk'
+          function Install-Release($version) {
+            $file = (Resolve-Path "work/release-check/AIPlayer-$version-Windows-x64-Setup.exe").Path
+            $args = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/LOG=`"$report/install-$version.log`"")
+            $process = Start-Process -FilePath $file -ArgumentList $args -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "Installer $version exited $($process.ExitCode)" }
+            $paths = @('HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*',
+                       'HKCU:/Software/WOW6432Node/Microsoft/Windows/CurrentVersion/Uninstall/*')
+            $entries = @(Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object DisplayName -eq 'AIPlayer')
+            if ($entries.Count -ne 1 -or $entries[0].DisplayVersion -ne $version) {
+              throw "Expected exactly one AIPlayer entry at version $version; found $($entries | ConvertTo-Json -Depth 2 -Compress)"
+            }
+            if (!(Test-Path $exe) -or !(Test-Path $shortcut)) { throw 'Installed executable or start menu shortcut missing' }
+            $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
+            if ($target -ne $exe) { throw "Shortcut points to $target, expected $exe" }
+          }
+          function Show-Window($version) {
+            $env:AIPLAYER_STARTUP_CHECK = '1'
+            $env:AIPLAYER_STARTUP_LOG = "$report/startup-$version.log"
+            $screenshot = "$report/window-$version.png"
+            $args = @('--quit-after', '5500', '--mute', '--screenshot', "`"$screenshot`"")
+            $process = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $installDir -PassThru
+            if (!$process.WaitForExit(30000)) {
+              $process.Kill()
+              throw "Application $version failed to exit in time"
+            }
+            if ($process.ExitCode -ne 0 -or !(Select-String -Path $env:AIPLAYER_STARTUP_LOG -Pattern '^EXIT 0$' -Quiet)) {
+              throw "Startup failed for $version"
+            }
+            python -c "from pathlib import Path; from struct import unpack; import sys; h=Path(sys.argv[1]).read_bytes()[:24]; assert h[:8]==bytes((137,80,78,71,13,10,26,10)) and min(unpack('>II', h[16:24]))>=300" $screenshot
+            if ($LASTEXITCODE -ne 0) { throw "Window capture failed for $version" }
+          }
+
+          Install-Release '0.2.1'
+          Show-Window '0.2.1'
+          $oldExecutable = (Get-FileHash $exe).Hash
+          if (!(Test-Path "$profile/cache") -or !(Test-Path "$profile/models")) { throw 'Default profile was not created' }
+          $settings = Join-Path $profile 'settings.json'
+          $transcript = Join-Path $profile 'cache/fixture.transcript.json'
+          $modelFile = Join-Path $profile 'models/fixture.bin'
+          '{"onboarded":true,"semantic_model":"test-model","recent":[]}' | Set-Content -Path $settings -Encoding utf8NoBOM
+          '{"complete":true,"segments":[{"start":0,"end":1,"text":"Upgrade fixture"}]}' | Set-Content -Path $transcript -Encoding utf8NoBOM
+          [IO.File]::WriteAllBytes($modelFile, [byte[]](1, 65, 0, 255))
+          $expected = @{}
+          foreach ($path in @($settings, $transcript, $modelFile)) { $expected[$path] = (Get-FileHash $path).Hash }
+          Install-Release '0.2.2'
+          if ((Get-FileHash $exe).Hash -eq $oldExecutable) { throw 'Old executable was not replaced' }
+          Show-Window '0.2.2'
+          foreach ($path in $expected.Keys) {
+            if ((Get-FileHash $path).Hash -ne $expected[$path]) { throw "User data changed: $path" }
+          }
+          'PASS: one app entry at 0.2.2, same folder and shortcut, both versions launched, settings/cache/model fixture hashes match.' | Tee-Object -FilePath "$report/result.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: Windows-startup-reproduction
-          path: |
-            work/windows-repro/*.log
-            work/windows-repro/*.json
-            work/windows-repro/*.txt
-            work/windows-repro/*.png
+          name: Windows-public-release-${{ matrix.scenario }}
+          path: work/windows-test
