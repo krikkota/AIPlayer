@@ -35,7 +35,11 @@ jobs:
       - name: Create installer
         run: python packaging/build_installer.py
       - name: Verify installed application launches
-        run: python packaging/check_windows_startup.py --installer outputs/AIPlayer-0.2.1-Windows-x64-Setup.exe --report-root work/installed-startup
+        run: |
+          $installer = Get-ChildItem outputs -Filter '*-Setup.exe' | Select-Object -First 1
+          python packaging/check_windows_startup.py --installer $installer.FullName --report-root work/installed-startup
+      - name: Verify SaT INT8 on Windows CPU
+        run: python packaging/check_segmentation_runtime.py
       - name: Record successful launch verification
         shell: python
         run: |
