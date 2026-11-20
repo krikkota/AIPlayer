@@ -29,7 +29,7 @@
 Распакуйте архив целиком и запустите файл `AIPlayer` из распакованной папки. Из терминала это `./AIPlayer`. Проверено на Ubuntu 24.04 x64. Для запуска в X11 или XWayland могут понадобиться библиотеки Qt. Для Ubuntu установите их командой:
 
 ```sh
-sudo apt install libegl1 libgl1 libopengl0 libxcb-cursor0 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-render-util0 libxcb-util1 libxcb-shape0 libxcb-xinput0
+sudo apt install libpulse0 libasound2t64 libegl1 libgl1 libopengl0 libxcb-cursor0 libxcb-keysyms1 libxcb-xinerama0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-render-util0 libxcb-util1 libxcb-shape0 libxcb-xinput0
 ```
 
 ### Первый запуск
