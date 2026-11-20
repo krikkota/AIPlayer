@@ -52,13 +52,13 @@ jobs:
             if ($process.ExitCode -ne 0) { throw "Installer $version exited $($process.ExitCode)" }
             $paths = @('HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*',
                        'HKCU:/Software/WOW6432Node/Microsoft/Windows/CurrentVersion/Uninstall/*')
-            $entries = @(Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object DisplayName -eq 'AIPlayer')
+            $entries = @(Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq '{93205E5A-D4D5-45AA-8DC5-4F67142E98F1}_is1' -or $_.DisplayName -match '^AIPlayer(?:\s|$)' })
             if ($entries.Count -ne 1 -or $entries[0].DisplayVersion -ne $version) {
               throw "Expected exactly one AIPlayer entry at version $version; found $($entries | ConvertTo-Json -Depth 2 -Compress)"
             }
             if (!(Test-Path $exe) -or !(Test-Path $shortcut)) { throw 'Installed executable or start menu shortcut missing' }
-            $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
-            if ($target -ne $exe) { throw "Shortcut points to $target, expected $exe" }
+            $target = (New-Object -ComObject WScript.Shell).CreateShortcut((Get-Item -LiteralPath $shortcut).FullName).TargetPath
+            if ($target -ne (Get-Item -LiteralPath $exe).FullName) { throw "Shortcut points to $target, expected $exe" }
           }
           function Show-Window($version) {
             $env:AIPLAYER_STARTUP_CHECK = '1'
